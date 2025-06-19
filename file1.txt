@@ -1,0 +1,134 @@
+#include <bits/stdc++.h>
+using namespace std;
+
+/* ---------- Helpers ------------------------------------------------------ */
+
+// Lower‑case and keep only alphanumerics + spaces
+string cleanLine(string s) {
+    transform(s.begin(), s.end(), s.begin(),
+              [](unsigned char c) { return std::tolower(c); });
+
+    for (char &c : s)
+        if (!isalnum(c) && !isspace(c)) c = ' ';
+    return s;
+}
+
+// Tokenise a whole file into a vector<string>
+vector<string> tokenizeFile(const string &path) {
+    ifstream fin(path);
+    if (!fin)
+        throw runtime_error("Cannot open file: " + path);
+
+    vector<string> tokens;
+    string line;
+    while (getline(fin, line)) {
+        line = cleanLine(line);
+        istringstream iss(line);
+        string word;
+        while (iss >> word) tokens.push_back(word);
+    }
+    return tokens;
+}
+
+/* ---------- TF‑IDF pipeline --------------------------------------------- */
+
+using FreqMap = unordered_map<string, double>;
+
+// Build term‑frequency map (raw counts)
+FreqMap termFreq(const vector<string> &tokens) {
+    FreqMap tf;
+    for (const auto &w : tokens) ++tf[w];
+    return tf;
+}
+
+// Build document‑frequency map across all docs
+FreqMap docFreq(const vector<FreqMap> &tfs) {
+    FreqMap df;
+    for (const auto &map : tfs)
+        for (const auto &kv : map)
+            df[kv.first] += 1;          // count docs containing term
+    return df;
+}
+
+// Convert TF map to TF‑IDF vector (as unordered_map)
+FreqMap tfidf(const FreqMap &tf,
+              const FreqMap &df,
+              int totalDocs)
+{
+    FreqMap vec;
+    double len = 0.0;
+    double denom = 0.0;
+    for (const auto &kv : tf) denom += kv.second; // total tokens
+
+    for (const auto &kv : tf) {
+        const string &term = kv.first;
+        double tf_norm = kv.second / denom;                   // normalised TF
+        double idf = log((double)totalDocs / df.at(term)) + 1.0;
+        vec[term] = tf_norm * idf;
+    }
+    return vec;
+}
+
+/* ---------- Vector maths ------------------------------------------------- */
+
+double dotProduct(const FreqMap &a, const FreqMap &b) {
+    const FreqMap *small = &a, *big = &b;
+    if (a.size() > b.size()) swap(small, big);
+
+    double sum = 0.0;
+    for (const auto &kv : *small) {
+        auto it = big->find(kv.first);
+        if (it != big->end())
+            sum += kv.second * it->second;
+    }
+    return sum;
+}
+
+double magnitude(const FreqMap &v) {
+    double sum = 0.0;
+    for (auto &kv : v) sum += kv.second * kv.second;
+    return sqrt(sum);
+}
+
+double cosineSimilarity(const FreqMap &a, const FreqMap &b) {
+    double magA = magnitude(a), magB = magnitude(b);
+    if (magA == 0 || magB == 0) return 0.0;
+    return dotProduct(a, b) / (magA * magB);
+}
+
+/* ---------- Main --------------------------------------------------------- */
+
+int main(int argc, char *argv[]) {
+    if (argc != 3) {
+        cerr << "Usage: " << argv[0] << " <file1> <file2>\n";
+        return 1;
+    }
+
+    try {
+        // 1. Tokenise both files
+        vector<string> tokens1 = tokenizeFile(argv[1]);
+        vector<string> tokens2 = tokenizeFile(argv[2]);
+
+        // 2. Build term‑frequencies
+        FreqMap tf1 = termFreq(tokens1);
+        FreqMap tf2 = termFreq(tokens2);
+        vector<FreqMap> allTF{tf1, tf2};
+
+        // 3. Compute document frequencies + TF‑IDF
+        FreqMap df = docFreq(allTF);
+        FreqMap vec1 = tfidf(tf1, df, 2);
+        FreqMap vec2 = tfidf(tf2, df, 2);
+
+        // 4. Cosine similarity
+        double similarity = cosineSimilarity(vec1, vec2);
+
+        cout << fixed << setprecision(4);
+        cout << "Cosine similarity between \"" << argv[1]
+             << "\" and \"" << argv[2] << "\" is: "
+             << similarity << endl;
+    } catch (const exception &ex) {
+        cerr << ex.what() << endl;
+        return 1;
+    }
+    return 0;
+}
